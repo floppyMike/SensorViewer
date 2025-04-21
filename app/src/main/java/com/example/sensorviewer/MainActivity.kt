@@ -1,16 +1,21 @@
 package com.example.sensorviewer
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +48,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +59,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -65,9 +72,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlin.math.roundToInt
 
-enum class Screen {
-    Accelerometer,
-    Gyroscope,
+enum class Screen(val labels: List<String>) {
+    Accelerometer(listOf("X", "Y", "Z")),
+    Gyroscope(listOf("X", "Y", "Z")),
 }
 
 // Accelerometer
@@ -95,6 +102,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val rnp = registerForActivityResult(RequestPermission()) {}
+
         enableEdgeToEdge()
         setContent {
             SensorViewerTheme {
@@ -104,7 +113,7 @@ class MainActivity : ComponentActivity() {
                     Screen.valueOf(backStackEntry?.destination?.route ?: Screen.Accelerometer.name)
 
                 Scaffold(
-                    topBar = { TopBarDisplay(currentScreen) },
+                    topBar = { TopBarDisplay(currentScreen, rnp) },
                     bottomBar = { BottomBarDisplay(navController, currentScreen) },
                     modifier = Modifier.fillMaxSize()
                 ) { innerPadding ->
@@ -124,7 +133,7 @@ class MainActivity : ComponentActivity() {
                             )
 
                             AccelerometerDisplay(
-                                listOf("X", "Y", "Z"),
+                                currentScreen.labels,
                                 accelState.map { it.toString() }
                             )
                         }
@@ -139,11 +148,11 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TopBarDisplay(screen: Screen) {
+fun TopBarDisplay(screen: Screen, rnp: ActivityResultLauncher<String>) {
     val showDialog = remember { mutableStateOf(false) }
 
     if (showDialog.value) {
-        DialogServiceCreate(showDialog)
+        DialogServiceCreate(screen.labels, showDialog, rnp)
     }
 
     TopAppBar(
@@ -159,14 +168,14 @@ fun TopBarDisplay(screen: Screen) {
 }
 
 @Composable
-fun DialogServiceCreate(showDialog: MutableState<Boolean>) {
+fun DialogServiceCreate(
+    labels: List<String>,
+    showDialog: MutableState<Boolean>,
+    rnp: ActivityResultLauncher<String>
+) {
     Dialog(onDismissRequest = { showDialog.value = false }) {
         val ctx = LocalContext.current
-
-        var ax by remember { mutableStateOf("10") }
-        var ay by remember { mutableStateOf("10") }
-        var az by remember { mutableStateOf("10") }
-
+        val inputData = remember { mutableStateListOf(*Array(labels.size) { "10" }) }
         var period by remember { mutableFloatStateOf(1f) }
 
         Card(
@@ -180,18 +189,36 @@ fun DialogServiceCreate(showDialog: MutableState<Boolean>) {
                     .padding(16.dp)
                     .fillMaxWidth()
             ) {
-                TextField(value = ax, onValueChange = { ax = it }, label = { Text("X") })
-                TextField(value = ay, onValueChange = { ay = it }, label = { Text("Y") })
-                TextField(value = az, onValueChange = { az = it }, label = { Text("Z") })
+                labels.indices.forEach { idx ->
+                    TextField(
+                        value = inputData[idx],
+                        onValueChange = { inputData[idx] = it },
+                        label = { Text(labels[idx]) })
+                }
+
                 Spacer(Modifier.height(16.dp))
                 PeriodSliderDisplay { period = it }
                 Spacer(Modifier.height(16.dp))
+
                 OutlinedButton(onClick = {
-                    showDialog.value = false
+                    val vals = inputData.map { it.toFloatOrNull() }
+                    if (vals.any { it == null }) {
+                        Toast.makeText(ctx, "Invalid input values!", Toast.LENGTH_SHORT).show()
+                        return@OutlinedButton
+                    }
+
+                    showDialog.value = false // Close dialog
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(
+                            ctx,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        rnp.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+
                     ctx.startForegroundService(Intent(ctx, SensorService::class.java).apply {
-                        putExtra(SensorService.EXTRA_AX, ax.toFloatOrNull() ?: 0f)
-                        putExtra(SensorService.EXTRA_AY, ay.toFloatOrNull() ?: 0f)
-                        putExtra(SensorService.EXTRA_AZ, az.toFloatOrNull() ?: 0f)
+                        putExtra(SensorService.EXTRA_DATA, vals.filterNotNull().toFloatArray())
                         putExtra(SensorService.EXTRA_PERIOD, period)
                     })
 
@@ -205,9 +232,7 @@ fun DialogServiceCreate(showDialog: MutableState<Boolean>) {
 }
 
 @Composable
-fun PeriodSliderDisplay(
-    onPeriodChange: (Float) -> Unit = {},
-) {
+fun PeriodSliderDisplay(onPeriodChange: (Float) -> Unit = {}) {
     var sliderPosition by remember { mutableFloatStateOf(1f) }
 
     Column(
