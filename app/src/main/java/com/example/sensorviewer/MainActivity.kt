@@ -1,11 +1,13 @@
 package com.example.sensorviewer
 
 import android.content.Context
+import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -159,11 +161,13 @@ fun TopBarDisplay(screen: Screen) {
 @Composable
 fun DialogServiceCreate(showDialog: MutableState<Boolean>) {
     Dialog(onDismissRequest = { showDialog.value = false }) {
-        var ax by remember { mutableStateOf("20") }
-        var ay by remember { mutableStateOf("20") }
-        var az by remember { mutableStateOf("20") }
+        val ctx = LocalContext.current
 
-        var period by remember { mutableFloatStateOf(0f) }
+        var ax by remember { mutableStateOf("10") }
+        var ay by remember { mutableStateOf("10") }
+        var az by remember { mutableStateOf("10") }
+
+        var period by remember { mutableFloatStateOf(1f) }
 
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -182,7 +186,17 @@ fun DialogServiceCreate(showDialog: MutableState<Boolean>) {
                 Spacer(Modifier.height(16.dp))
                 PeriodSliderDisplay { period = it }
                 Spacer(Modifier.height(16.dp))
-                OutlinedButton(onClick = { }) {
+                OutlinedButton(onClick = {
+                    showDialog.value = false
+                    ctx.startForegroundService(Intent(ctx, SensorService::class.java).apply {
+                        putExtra(SensorService.EXTRA_AX, ax.toFloatOrNull() ?: 0f)
+                        putExtra(SensorService.EXTRA_AY, ay.toFloatOrNull() ?: 0f)
+                        putExtra(SensorService.EXTRA_AZ, az.toFloatOrNull() ?: 0f)
+                        putExtra(SensorService.EXTRA_PERIOD, period)
+                    })
+
+                    Toast.makeText(ctx, "Service started", Toast.LENGTH_SHORT).show()
+                }) {
                     Text(text = "Set Threshold")
                 }
             }

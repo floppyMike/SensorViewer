@@ -24,16 +24,6 @@
             android:exported="true"
             android:foregroundServiceType="location"></service>
 
-        <receiver
-            android:name=".ThresholdAlertReceiver"
-            android:exported="false"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="com.example.THRESHOLD_TRIGGERED" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </receiver>
-
         <activity
             android:name=".MainActivity"
             android:exported="true"
