@@ -98,6 +98,27 @@ fun Context.accelerometerFlow(): Flow<List<Float>> = callbackFlow {
     awaitClose { sensorManager.unregisterListener(listener) }
 }
 
+// Gyroscope
+
+fun Context.gyroscopeFlow(): Flow<List<Float>> = callbackFlow {
+    val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    val gyroSensor =
+        sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) ?: run { return@callbackFlow }
+
+    val listener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
+                trySend(event.values.toList())
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    sensorManager.registerListener(listener, gyroSensor, SensorManager.SENSOR_DELAY_NORMAL)
+    awaitClose { sensorManager.unregisterListener(listener) }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -132,9 +153,19 @@ class MainActivity : ComponentActivity() {
                                 initial = listOf(0f, 0f, 0f)
                             )
 
-                            AccelerometerDisplay(
+                            SensorDisplay(
                                 currentScreen.labels,
                                 accelState.map { it.toString() }
+                            )
+                        }
+                        composable(route = Screen.Gyroscope.name) {
+                            val gyroState by remember { ctx.gyroscopeFlow() }.collectAsState(
+                                initial = listOf(0f, 0f, 0f)
+                            )
+
+                            SensorDisplay(
+                                currentScreen.labels,
+                                gyroState.map { it.toString() }
                             )
                         }
                     }
@@ -152,7 +183,7 @@ fun TopBarDisplay(screen: Screen, rnp: ActivityResultLauncher<String>) {
     val showDialog = remember { mutableStateOf(false) }
 
     if (showDialog.value) {
-        DialogServiceCreate(screen.labels, showDialog, rnp)
+        DialogServiceCreate(screen, showDialog, rnp)
     }
 
     TopAppBar(
@@ -169,13 +200,13 @@ fun TopBarDisplay(screen: Screen, rnp: ActivityResultLauncher<String>) {
 
 @Composable
 fun DialogServiceCreate(
-    labels: List<String>,
+    screen: Screen,
     showDialog: MutableState<Boolean>,
     rnp: ActivityResultLauncher<String>
 ) {
     Dialog(onDismissRequest = { showDialog.value = false }) {
         val ctx = LocalContext.current
-        val inputData = remember { mutableStateListOf(*Array(labels.size) { "10" }) }
+        val inputData = remember { mutableStateListOf(*Array(screen.labels.size) { "10" }) }
         var period by remember { mutableFloatStateOf(1f) }
 
         Card(
@@ -189,11 +220,11 @@ fun DialogServiceCreate(
                     .padding(16.dp)
                     .fillMaxWidth()
             ) {
-                labels.indices.forEach { idx ->
+                screen.labels.indices.forEach { idx ->
                     TextField(
                         value = inputData[idx],
                         onValueChange = { inputData[idx] = it },
-                        label = { Text(labels[idx]) })
+                        label = { Text(screen.labels[idx]) })
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -220,6 +251,7 @@ fun DialogServiceCreate(
                     ctx.startForegroundService(Intent(ctx, SensorService::class.java).apply {
                         putExtra(SensorService.EXTRA_DATA, vals.filterNotNull().toFloatArray())
                         putExtra(SensorService.EXTRA_PERIOD, period)
+                        putExtra(SensorService.EXTRA_SENSOR, screen.name)
                     })
 
                     Toast.makeText(ctx, "Service started", Toast.LENGTH_SHORT).show()
@@ -264,23 +296,25 @@ fun PeriodSliderDisplay(onPeriodChange: (Float) -> Unit = {}) {
 @Composable
 fun BottomBarDisplay(nav: NavHostController, screen: Screen) {
     NavigationBar {
-        NavigationBarItem(
-            icon = { Icon(Icons.Rounded.Info, contentDescription = "Live") },
-            label = { Text(text = Screen.Accelerometer.name) },
-            selected = screen == Screen.Accelerometer,
-            onClick = {
-                nav.navigate(Screen.Accelerometer.name) {
-                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                    launchSingleTop = true
-                    restoreState = true
+        Screen.entries.forEach {
+            NavigationBarItem(
+                icon = { Icon(Icons.Rounded.Info, contentDescription = it.name) },
+                label = { Text(text = it.name) },
+                selected = screen == it,
+                onClick = {
+                    nav.navigate(it.name) {
+                        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
-            }
-        )
+            )
+        }
     }
 }
 
 @Composable
-fun AccelerometerDisplay(
+fun SensorDisplay(
     labels: List<String>,
     data: List<String>,
 ) {

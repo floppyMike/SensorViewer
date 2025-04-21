@@ -12,17 +12,20 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 import kotlin.math.roundToLong
 
 class SensorService : Service() {
     companion object {
         const val CHANNEL_ID = "monitor_service_channel"
         const val NOTIFICATION_ID = 1
-        private const val ACTION_STOP_SERVICE = "com.example.sensorviewer.ACTION_STOP_SERVICE"
+        const val ACTION_STOP_SERVICE = "com.example.sensorviewer.ACTION_STOP_SERVICE"
 
         const val EXTRA_DATA = "extra_data"
         const val EXTRA_PERIOD = "extra_period"
+        const val EXTRA_SENSOR = "extra_sensor"
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
@@ -36,13 +39,13 @@ class SensorService : Service() {
             CHANNEL_ID,
             "Sensor Monitoring",
             NotificationManager.IMPORTANCE_LOW
-        ).apply { description = "Channel for accelerometer monitor service" }
+        ).apply { description = "Channel for sensor monitor service" }
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(serviceChannel)
 
         startForeground(
             NOTIFICATION_ID, NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Accelerometer Monitor")
+                .setContentTitle("Sensor Monitor")
                 .setContentText("Monitoring thresholds...")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .addAction(
@@ -65,26 +68,32 @@ class SensorService : Service() {
         }
 
         intent?.let {
-            val threshold = it.getFloatArrayExtra(EXTRA_DATA)?.toList()
-                ?: emptyList() // Empty list will disable it
+            val threshold = it.getFloatArrayExtra(EXTRA_DATA)!!.toList()
             val period = it.getFloatExtra(EXTRA_PERIOD, 1f).roundToLong() * 1000
+            val sensor = it.getStringExtra(EXTRA_SENSOR)!!
             var prevTime = 0L
 
+            val flow: Flow<List<Float>> = when (sensor) {
+                Screen.Accelerometer.name -> this@SensorService.accelerometerFlow()
+                Screen.Gyroscope.name -> this@SensorService.gyroscopeFlow()
+                else -> throw UnsupportedOperationException()
+            }
+
             serviceScope.launch {
-                this@SensorService
-                    .accelerometerFlow()
-                    .collect {
-                        val now = System.currentTimeMillis()
-                        if (now - prevTime >= period && it.zip(threshold).any { (c, t) -> c > t }) {
-                            prevTime = now
-                            CoroutineScope(Dispatchers.Main).launch {
-                                Toast.makeText(
-                                    this@SensorService, "Threshold exceeded: $threshold",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
+                flow.collect {
+                    val now = System.currentTimeMillis()
+                    if (now - prevTime >= period && it.zip(threshold)
+                            .any { (c, t) -> c.absoluteValue > t }
+                    ) {
+                        prevTime = now
+                        CoroutineScope(Dispatchers.Main).launch {
+                            Toast.makeText(
+                                this@SensorService, "Threshold exceeded: $threshold",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
+                }
             }
         }
 
