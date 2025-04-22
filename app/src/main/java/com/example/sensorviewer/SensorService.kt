@@ -76,14 +76,26 @@ class SensorService : Service() {
             val flow: Flow<List<Float>> = when (sensor) {
                 Screen.Accelerometer.name -> this@SensorService.accelerometerFlow()
                 Screen.Gyroscope.name -> this@SensorService.gyroscopeFlow()
+                Screen.GPS.name -> this@SensorService.gpsFlow(period)
+                else -> throw UnsupportedOperationException()
+            }
+
+            val comp: (List<Float>, List<Float>) -> Boolean = when (sensor) {
+                Screen.Accelerometer.name, Screen.Gyroscope.name -> { a, b ->
+                    a.zip(b).any { (c, t) -> c.absoluteValue > t }
+                }
+
+                Screen.GPS.name -> { a, b -> a == b }
+
                 else -> throw UnsupportedOperationException()
             }
 
             serviceScope.launch {
                 flow.collect {
                     val now = System.currentTimeMillis()
-                    if (now - prevTime >= period && it.zip(threshold)
-                            .any { (c, t) -> c.absoluteValue > t }
+                    if ((sensor == Screen.GPS.name || now - prevTime >= period) && comp(
+                            it, threshold
+                        )
                     ) {
                         prevTime = now
                         CoroutineScope(Dispatchers.Main).launch {

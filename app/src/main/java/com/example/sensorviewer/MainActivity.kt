@@ -1,6 +1,7 @@
 package com.example.sensorviewer
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -8,8 +9,12 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -59,7 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.checkSelfPermission
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -75,6 +80,7 @@ import kotlin.math.roundToInt
 enum class Screen(val labels: List<String>) {
     Accelerometer(listOf("X", "Y", "Z")),
     Gyroscope(listOf("X", "Y", "Z")),
+    GPS(listOf("Latitude", "Longitude"))
 }
 
 // Accelerometer
@@ -117,6 +123,28 @@ fun Context.gyroscopeFlow(): Flow<List<Float>> = callbackFlow {
 
     sensorManager.registerListener(listener, gyroSensor, SensorManager.SENSOR_DELAY_NORMAL)
     awaitClose { sensorManager.unregisterListener(listener) }
+}
+
+// GPS
+
+@SuppressLint("MissingPermission") // Check already before
+fun Context.gpsFlow(period: Long): Flow<List<Float>> = callbackFlow {
+    val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+    val listener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            trySend(
+                listOf(
+                    location.latitude.toFloat(),
+                    location.longitude.toFloat(),
+                )
+            )
+        }
+    }
+
+    locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, period, 0f, listener,
+        Looper.getMainLooper())
+    awaitClose { locationManager.removeUpdates(listener) }
 }
 
 class MainActivity : ComponentActivity() {
@@ -168,6 +196,23 @@ class MainActivity : ComponentActivity() {
                                 gyroState.map { it.toString() }
                             )
                         }
+                        composable(route = Screen.GPS.name) {
+                            if (checkSelfPermission(
+                                    ctx, Manifest.permission.ACCESS_FINE_LOCATION
+                                ) != PackageManager.PERMISSION_GRANTED
+                            ) {
+                                rnp.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                            }
+
+                            val gyroState by remember { ctx.gpsFlow(1) }.collectAsState(
+                                initial = listOf(0f, 0f, 0f)
+                            )
+
+                            SensorDisplay(
+                                currentScreen.labels,
+                                gyroState.map { it.toString() }
+                            )
+                        }
                     }
                 }
             }
@@ -207,7 +252,7 @@ fun DialogServiceCreate(
     Dialog(onDismissRequest = { showDialog.value = false }) {
         val ctx = LocalContext.current
         val inputData = remember { mutableStateListOf(*Array(screen.labels.size) { "10" }) }
-        var period by remember { mutableFloatStateOf(1f) }
+        var period by remember { mutableFloatStateOf(5f) }
 
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -228,7 +273,7 @@ fun DialogServiceCreate(
                 }
 
                 Spacer(Modifier.height(16.dp))
-                PeriodSliderDisplay { period = it }
+                PeriodSliderDisplay(period) { period = it }
                 Spacer(Modifier.height(16.dp))
 
                 OutlinedButton(onClick = {
@@ -240,9 +285,8 @@ fun DialogServiceCreate(
 
                     showDialog.value = false // Close dialog
 
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(
-                            ctx,
-                            Manifest.permission.POST_NOTIFICATIONS
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkSelfPermission(
+                            ctx, Manifest.permission.POST_NOTIFICATIONS
                         ) != PackageManager.PERMISSION_GRANTED
                     ) {
                         rnp.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -264,8 +308,8 @@ fun DialogServiceCreate(
 }
 
 @Composable
-fun PeriodSliderDisplay(onPeriodChange: (Float) -> Unit = {}) {
-    var sliderPosition by remember { mutableFloatStateOf(1f) }
+fun PeriodSliderDisplay(sliderStart: Float, onPeriodChange: (Float) -> Unit = {}) {
+    var sliderPosition by remember { mutableFloatStateOf(sliderStart) }
 
     Column(
         modifier = Modifier.padding(horizontal = 16.dp),
@@ -285,7 +329,7 @@ fun PeriodSliderDisplay(onPeriodChange: (Float) -> Unit = {}) {
                 inactiveTrackColor = MaterialTheme.colorScheme.secondaryContainer,
             ),
             steps = 8,
-            valueRange = 1f..10f
+            valueRange = sliderStart..15f
         )
         Text(text = "Update Period: ${sliderPosition.roundToInt()}s")
     }
