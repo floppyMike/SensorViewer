@@ -142,8 +142,10 @@ fun Context.gpsFlow(period: Long): Flow<List<Float>> = callbackFlow {
         }
     }
 
-    locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, period, 0f, listener,
-        Looper.getMainLooper())
+    locationManager.requestLocationUpdates(
+        LocationManager.GPS_PROVIDER, period, 0f, listener,
+        Looper.getMainLooper()
+    )
     awaitClose { locationManager.removeUpdates(listener) }
 }
 
@@ -152,6 +154,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val rnp = registerForActivityResult(RequestPermission()) {}
+
+        if (checkSelfPermission(
+                this, Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            rnp.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
 
         enableEdgeToEdge()
         setContent {
@@ -199,19 +208,19 @@ class MainActivity : ComponentActivity() {
                         composable(route = Screen.GPS.name) {
                             if (checkSelfPermission(
                                     ctx, Manifest.permission.ACCESS_FINE_LOCATION
-                                ) != PackageManager.PERMISSION_GRANTED
+                                ) == PackageManager.PERMISSION_GRANTED
                             ) {
-                                rnp.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                                val gpsState by remember { ctx.gpsFlow(1) }.collectAsState(
+                                    initial = listOf(0f, 0f, 0f)
+                                )
+
+                                SensorDisplay(
+                                    currentScreen.labels,
+                                    gpsState.map { it.toString() }
+                                )
+                            } else {
+                                Text("Needs precise location services.")
                             }
-
-                            val gyroState by remember { ctx.gpsFlow(1) }.collectAsState(
-                                initial = listOf(0f, 0f, 0f)
-                            )
-
-                            SensorDisplay(
-                                currentScreen.labels,
-                                gyroState.map { it.toString() }
-                            )
                         }
                     }
                 }
