@@ -261,7 +261,9 @@ fun DialogServiceCreate(
     Dialog(onDismissRequest = { showDialog.value = false }) {
         val ctx = LocalContext.current
         val inputData = remember { mutableStateListOf(*Array(screen.labels.size) { "10" }) }
-        var period by remember { mutableFloatStateOf(5f) }
+
+        val periodStart = 5f
+        var period by remember { mutableFloatStateOf(periodStart) }
 
         Card(
             shape = RoundedCornerShape(16.dp),
@@ -282,7 +284,7 @@ fun DialogServiceCreate(
                 }
 
                 Spacer(Modifier.height(16.dp))
-                PeriodSliderDisplay(period) { period = it }
+                PeriodSliderDisplay(periodStart) { period = it }
                 Spacer(Modifier.height(16.dp))
 
                 OutlinedButton(onClick = {
